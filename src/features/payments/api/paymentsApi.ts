@@ -1,11 +1,12 @@
 import { baseApi } from '@/api/baseApi';
-import type { PaginatedResponse, Payment, PaymentVerificationStatus } from '@/types';
+import type { PaginatedResponse, Payment, PaymentMethod, PaymentVerificationStatus } from '@/types';
 
 /** Request body for recording a payment claim. */
 interface CreatePaymentRequest {
   contributionId: string;
   amount: number;
   transactionReference: string;
+  paymentMethod?: PaymentMethod;
 }
 
 /** Params for the create payment mutation. */
@@ -35,6 +36,43 @@ export const paymentsApi = baseApi.injectEndpoints({
         body,
       }),
       invalidatesTags: ['Payment'],
+    }),
+
+    uploadPaymentReceipt: builder.mutation<Payment, { committeeId: string; id: string; receipt: File }>({
+      query: ({ committeeId, id, receipt }) => {
+        const body = new FormData();
+        body.append('receipt', receipt);
+        return { url: `/committees/${committeeId}/payments/${id}/receipt`, method: 'POST', body };
+      },
+      invalidatesTags: ['Payment', 'Audit'],
+    }),
+
+    // Keep private binary data out of Redux. The cache owns and releases the preview URL.
+    getPaymentReceipt: builder.query<string, { committeeId: string; id: string }>({
+      query: ({ committeeId, id }) => ({
+        url: `/committees/${committeeId}/payments/${id}/receipt`,
+        cache: 'no-store',
+        responseHandler: async (response) => {
+          if (!response.ok) return null;
+          const blob = await response.blob();
+          if (!['image/png', 'image/jpeg'].includes(blob.type)) throw new Error('Unexpected receipt format');
+          return URL.createObjectURL(blob);
+        },
+      }),
+      keepUnusedDataFor: 0,
+      async onQueryStarted(_args, { queryFulfilled, getCacheEntry, requestId }) {
+        try {
+          const { data } = await queryFulfilled;
+          if (getCacheEntry().requestId !== requestId) URL.revokeObjectURL(data);
+        } catch { /* No preview was created. */ }
+      },
+      async onCacheEntryAdded(_args, { cacheDataLoaded, cacheEntryRemoved }) {
+        try {
+          const { data } = await cacheDataLoaded;
+          await cacheEntryRemoved;
+          URL.revokeObjectURL(data);
+        } catch { /* The preview was closed before loading completed. */ }
+      },
     }),
 
     /**
@@ -77,6 +115,15 @@ export const paymentsApi = baseApi.injectEndpoints({
     getPayment: builder.query<Payment, { committeeId: string; id: string }>({
       query: ({ committeeId, id }) => `/committees/${committeeId}/payments/${id}`,
       providesTags: ['Payment'],
+      async onQueryStarted(_args, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled;
+          // An admin may have decided the claim in another session.
+          if (data.status !== 'PENDING') {
+            dispatch(baseApi.util.invalidateTags(['Contribution', 'Cycle']));
+          }
+        } catch { /* Keep the last authoritative financial state on read failure. */ }
+      },
     }),
   }),
 });
@@ -85,4 +132,6 @@ export const {
   useCreatePaymentMutation,
   useGetPaymentsQuery,
   useGetPaymentQuery,
+  useUploadPaymentReceiptMutation,
+  useGetPaymentReceiptQuery,
 } = paymentsApi;

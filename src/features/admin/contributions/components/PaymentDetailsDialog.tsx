@@ -1,269 +1,159 @@
-'use client';
+﻿'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
-  Alert,
-  Avatar,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  Typography,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, Dialog, DialogActions,
+  DialogContent, DialogTitle, Divider, FormControlLabel, Stack, Typography,
 } from '@mui/material';
-import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
-import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
 import type { Cycle } from '@/types';
-import { formatCurrency, formatDateTime, getInitials } from '@/utils';
-import { useGetPaymentQuery } from '@/features/payments';
+import { formatCurrency, formatDateTime } from '@/utils';
+import { ReceiptPreview, ReceiptUpload, useGetPaymentQuery } from '@/features/payments';
+import { PAYMENT_METHOD_LABELS, paymentError, paymentStatusLabel } from '@/features/payments/utils/paymentPresentation';
 import { useRejectPaymentMutation, useVerifyPaymentMutation } from '../api/adminContributionsApi';
 import { canActOnPayment, paymentStatusColor, contributionStatusColor } from '../utils/statusFlow';
-import { cycleLabel } from './CycleSelector';
+import { adminPaymentError, canAttachPaymentReceipt, paymentVerificationIssue } from '../utils/paymentActions';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface PaymentDetailsDialogProps {
   open: boolean;
   onClose: () => void;
   committeeId: string;
-  /** Null closes the dialog; the query is skipped until an id is present. */
   paymentId: string | null;
-  /** Committee cycles, used only to label which cycle the payment belongs to. */
   cycles: Cycle[];
+  canManage: boolean;
 }
 
-/** A label/value row used in the payment details body. */
-function Detail({ label, value }: { label: string; value: React.ReactNode }) {
+function Detail({ label, value }: { label: string; value: string }) {
   return (
     <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, py: 0.75 }}>
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 500, textAlign: 'right' }}>
-        {value}
-      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>{label}</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 500, textAlign: 'right', overflowWrap: 'anywhere', minWidth: 0 }}>{value}</Typography>
     </Box>
   );
 }
 
-function cycleNameFor(cycles: Cycle[], cycleId: string | undefined): string | null {
-  if (!cycleId) return null;
-  const cycle = cycles.find((item) => item.id === cycleId);
-  return cycle ? cycleLabel(cycle) : null;
-}
-
-/**
- * Payment details + verification panel for
- * GET /committees/:committeeId/payments/:id.
- *
- * Verify and reject call the documented POST endpoints with no body. Every
- * consequence (payment status, contribution status, cycle totals, audit
- * entries, member notifications) is performed by the backend — this dialog
- * only reflects the responses it gets back.
- */
-export function PaymentDetailsDialog({
-  open,
-  onClose,
-  committeeId,
-  paymentId,
-  cycles,
-}: PaymentDetailsDialogProps) {
-  const [verifyConfirmOpen, setVerifyConfirmOpen] = useState(false);
-  const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false);
+function PaymentReview({ onClose, committeeId, paymentId, cycles, canManage }: Omit<PaymentDetailsDialogProps, 'open' | 'paymentId'> & { paymentId: string }) {
+  const [decision, setDecision] = useState<'verify' | 'reject' | null>(null);
+  const [accountChecked, setAccountChecked] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  const [verifyPayment, verifyResult] = useVerifyPaymentMutation();
-  const [rejectPayment, rejectResult] = useRejectPaymentMutation();
-
-  const { data: payment, isError, error } = useGetPaymentQuery(
-    { committeeId, id: paymentId ?? '' },
-    { skip: !open || !paymentId },
+  const [deciding, setDeciding] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const locked = useRef(false);
+  const [verifyPayment] = useVerifyPaymentMutation();
+  const [rejectPayment] = useRejectPaymentMutation();
+  const { currentData: payment, isFetching, isError, error, refetch } = useGetPaymentQuery(
+    { committeeId, id: paymentId }, { refetchOnMountOrArgChange: true },
   );
+  const busy = deciding || uploading;
+  const actionable = Boolean(canManage && payment && !isError && canActOnPayment(payment.status));
+  const verificationIssue = payment ? paymentVerificationIssue(payment) : 'Load the payment before reviewing it.';
+  const cycle = cycles.find((item) => item.id === payment?.contribution?.cycleId);
 
-  const handleClose = () => {
-    if (verifyResult.isLoading || rejectResult.isLoading) return;
+  const decide = async () => {
+    if (locked.current || busy || isFetching || !actionable || !decision || (decision === 'verify' && (!accountChecked || verificationIssue))) return;
+    locked.current = true;
+    setDeciding(true);
+    setActionError(null);
     setSuccessMessage(null);
-    setActionError(null);
-    onClose();
-  };
-
-  const handleVerify = async () => {
-    if (!paymentId) return;
-    setActionError(null);
     try {
-      await verifyPayment({ committeeId, id: paymentId }).unwrap();
-      setSuccessMessage('Payment verified. The contribution is now PAID and the member has been notified.');
-      setVerifyConfirmOpen(false);
+      // Recheck the selected claim immediately before submitting a decision.
+      const latest = await refetch().unwrap();
+      const issue = decision === 'verify' ? paymentVerificationIssue(latest)
+        : canActOnPayment(latest.status) ? null : 'This claim has already been decided. Refresh to see its current status.';
+      if (issue) {
+        setActionError(issue);
+        return;
+      }
+      const request = { committeeId, id: paymentId };
+      const result = await (decision === 'verify' ? verifyPayment(request) : rejectPayment(request)).unwrap();
+      setSuccessMessage(result.status === 'VERIFIED'
+        ? 'Payment verified. The backend has recorded the approval; the contribution and totals are being refreshed.'
+        : result.status === 'REJECTED'
+          ? 'Claim rejected. Its receipt is retained, and the member can submit a new claim if still eligible.'
+          : 'The server returned a pending claim. Refresh and check its status.');
+      setDecision(null);
+      setAccountChecked(false);
     } catch (err: unknown) {
-      const e = err as { data?: { message?: string } };
-      setActionError(e.data?.message ?? 'Failed to verify the payment. Please try again.');
+      setActionError(adminPaymentError(err, 'review'));
+    } finally {
+      locked.current = false;
+      setDeciding(false);
     }
   };
-
-  const handleReject = async () => {
-    if (!paymentId) return;
-    setActionError(null);
-    try {
-      await rejectPayment({ committeeId, id: paymentId }).unwrap();
-      setSuccessMessage('Payment rejected. The member has been notified and can submit a new payment claim.');
-      setRejectConfirmOpen(false);
-    } catch (err: unknown) {
-      const e = err as { data?: { message?: string } };
-      setActionError(e.data?.message ?? 'Failed to reject the payment. Please try again.');
-    }
-  };
-
-  const member = payment?.contribution?.member;
-  const cycleName = cycleNameFor(cycles, payment?.contribution?.cycleId);
-  const actionable = payment ? canActOnPayment(payment.status) : false;
 
   return (
     <>
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>Payment Details</DialogTitle>
+      <Dialog open onClose={() => { if (!busy) onClose(); }} maxWidth="sm" fullWidth aria-labelledby="admin-payment-title">
+        <DialogTitle id="admin-payment-title">Review payment claim</DialogTitle>
         <DialogContent>
           {isError ? (
-            <Alert severity="error" sx={{ mt: 1 }}>
-              {(error as { data?: { message?: string } })?.data?.message ??
-                'Failed to load payment details. Please try again.'}
-            </Alert>
+            <Alert severity="error" action={<Button color="inherit" onClick={() => refetch()}>Retry</Button>}>{paymentError(error)}</Alert>
           ) : !payment ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 5 }}>
-              <CircularProgress size={28} />
-            </Box>
+            <Box sx={{ textAlign: 'center', py: 5 }}><CircularProgress aria-label="Loading payment details" /></Box>
           ) : (
-            <Box sx={{ mt: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                <Avatar sx={{ width: 56, height: 56, bgcolor: 'primary.main' }}>
-                  {member?.user?.name ? getInitials(member.user.name) : '?'}
-                </Avatar>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="h6" noWrap>
-                    {member?.user?.name ?? 'Unknown member'}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" noWrap>
-                    {member?.user?.email ?? '—'}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, mt: 0.75, flexWrap: 'wrap' }}>
-                    <Chip
-                      label={`Payment ${payment.status}`}
-                      size="small"
-                      color={paymentStatusColor(payment.status)}
-                    />
-                    {payment.contribution && (
-                      <Chip
-                        label={`Contribution ${payment.contribution.status}`}
-                        size="small"
-                        variant="outlined"
-                        color={contributionStatusColor(payment.contribution.status)}
-                      />
-                    )}
-                  </Box>
-                </Box>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Box>
+                <Typography variant="h6">{payment.contribution?.member?.user?.name ?? 'Member not recorded'}</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{payment.contribution?.member?.user?.email}</Typography>
+                <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', gap: 1 }}>
+                  <Chip label={paymentStatusLabel(payment)} color={paymentStatusColor(payment.status)} size="small" />
+                  {payment.contribution && <Chip label={`Contribution ${payment.contribution.status}`} size="small" variant="outlined" color={contributionStatusColor(payment.contribution.status)} />}
+                </Stack>
               </Box>
-              <Divider sx={{ mb: 1 }} />
-              <Detail label="Amount" value={formatCurrency(payment.amount)} />
-              <Detail label="Transaction reference" value={payment.transactionReference} />
-              {cycleName && <Detail label="Cycle" value={cycleName} />}
-              <Detail label="Paid at" value={formatDateTime(payment.paidAt)} />
-              <Detail label="Verified at" value={formatDateTime(payment.verifiedAt)} />
-              {payment.contribution && (
-                <Detail
-                  label="Contribution amount"
-                  value={formatCurrency(payment.contribution.amount)}
-                />
-              )}
-              <Detail label="Recorded" value={formatDateTime(payment.createdAt)} />
-
-              {successMessage && (
-                <Alert severity="success" sx={{ mt: 2 }} onClose={() => setSuccessMessage(null)}>
-                  {successMessage}
-                </Alert>
-              )}
-              {actionError && (
-                <Alert severity="error" sx={{ mt: 2 }} onClose={() => setActionError(null)}>
-                  {actionError}
-                </Alert>
-              )}
-
-              {!actionable && (
-                <Alert severity="info" sx={{ mt: 2 }}>
-                  This payment is {payment.status}. Only PENDING payments can be verified or
-                  rejected.
-                </Alert>
-              )}
-            </Box>
+              <Box>
+                <Detail label="Claim amount" value={formatCurrency(payment.amount)} />
+                <Detail label="Contribution amount" value={payment.contribution ? formatCurrency(payment.contribution.amount) : 'Not recorded'} />
+                <Detail label="Payment method" value={payment.paymentMethod ? PAYMENT_METHOD_LABELS[payment.paymentMethod] ?? 'Not recorded' : 'Not recorded'} />
+                <Detail label="Reference" value={payment.transactionReference} />
+                <Detail label="Cycle" value={cycle ? `Cycle ${cycle.cycleNumber}` : 'Not recorded'} />
+                <Detail label="Claim recorded" value={formatDateTime(payment.paidAt)} />
+                <Detail label="Admin decision" value={formatDateTime(payment.verifiedAt)} />
+              </Box>
+              <Typography variant="caption" color="text.secondary">The claim timestamp is not confirmation that money reached the receiving account.</Typography>
+              {successMessage && <Alert severity="success" onClose={() => setSuccessMessage(null)}>{successMessage}</Alert>}
+              {!canManage && <Alert severity="info">Only the committee creator can access receipts and manage these claims.</Alert>}
+              <Divider />
+              <Typography variant="subtitle1">Payment receipt</Typography>
+              {canManage && payment.receipt ? (
+                <>
+                  <Typography variant="caption" color="text.secondary">Uploaded {formatDateTime(payment.receipt.uploadedAt)} · {Math.ceil(payment.receipt.size / 1024)} KiB</Typography>
+                  <ReceiptPreview key={payment.receipt.id} committeeId={committeeId} paymentId={paymentId} />
+                </>
+              ) : canManage && canAttachPaymentReceipt(payment) ? (
+                <ReceiptUpload committeeId={committeeId} paymentId={paymentId} onBusyChange={setUploading}
+                  onUploaded={() => setSuccessMessage('Receipt attached. Check the receiving account before verifying this claim.')} />
+              ) : <Typography variant="body2" color="text.secondary">{payment.receipt ? 'Receipt access is restricted.' : 'No receipt attached. Upload requires a pending claim, unpaid contribution and active cycle.'}</Typography>}
+              {actionable && verificationIssue && <Alert severity="warning">{verificationIssue} You can still reject a pending claim, including one without a receipt.</Alert>}
+              {payment.status === 'REJECTED' && <Alert severity="info">The old claim and receipt cannot be replaced. Record a new claim from Contributions if the contribution remains unpaid and its cycle is active.</Alert>}
+            </Stack>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose} color="inherit">
-            Close
-          </Button>
-          {payment && actionable && (
-            <>
-              <Button
-                color="error"
-                startIcon={<BlockOutlinedIcon />}
-                disabled={verifyResult.isLoading || rejectResult.isLoading}
-                onClick={() => {
-                  setActionError(null);
-                  setRejectConfirmOpen(true);
-                }}
-              >
-                Reject
-              </Button>
-              <Button
-                variant="contained"
-                color="success"
-                startIcon={<TaskAltOutlinedIcon />}
-                disabled={verifyResult.isLoading || rejectResult.isLoading}
-                onClick={() => {
-                  setActionError(null);
-                  setVerifyConfirmOpen(true);
-                }}
-              >
-                Verify
-              </Button>
-            </>
-          )}
+        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <Button onClick={() => refetch()} disabled={busy || isFetching} variant="outlined">Refresh status</Button>
+          <Button onClick={onClose} disabled={busy} color="inherit">Close</Button>
+          {actionable && <>
+            <Button color="error" disabled={busy || isFetching} onClick={() => { setActionError(null); setDecision('reject'); }}>Reject</Button>
+            <Button color="success" disabled={busy || isFetching || Boolean(verificationIssue)} onClick={() => { setActionError(null); setAccountChecked(false); setDecision('verify'); }}>Verify</Button>
+          </>}
         </DialogActions>
       </Dialog>
-
-      <ConfirmDialog
-        open={verifyConfirmOpen}
-        title="Verify Payment"
-        confirmLabel="Verify"
-        confirmColor="success"
-        loading={verifyResult.isLoading}
-        errorMessage={actionError}
-        onConfirm={handleVerify}
-        onClose={() => (verifyResult.isLoading ? undefined : setVerifyConfirmOpen(false))}
-      >
-        Verify the payment of{' '}
-        <strong>{payment ? formatCurrency(payment.amount) : 'this amount'}</strong> from{' '}
-        <strong>{member?.user?.name ?? 'this member'}</strong>? The backend will mark the
-        contribution PAID, update the cycle totals, write an audit entry, and notify the member.
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={rejectConfirmOpen}
-        title="Reject Payment"
-        confirmLabel="Reject"
-        confirmColor="error"
-        loading={rejectResult.isLoading}
-        errorMessage={actionError}
-        onConfirm={handleReject}
-        onClose={() => (rejectResult.isLoading ? undefined : setRejectConfirmOpen(false))}
-      >
-        Reject the payment of{' '}
-        <strong>{payment ? formatCurrency(payment.amount) : 'this amount'}</strong> from{' '}
-        <strong>{member?.user?.name ?? 'this member'}</strong>? The member is notified and can
-        submit a new payment claim — the contribution remains PENDING or OVERDUE.
+      <ConfirmDialog open={decision !== null} title={decision === 'verify' ? 'Verify payment' : 'Reject payment claim'}
+        confirmLabel={decision === 'verify' ? 'Verify payment' : 'Reject claim'} confirmColor={decision === 'verify' ? 'success' : 'error'}
+        loading={deciding} confirmDisabled={!actionable || isFetching || uploading || (decision === 'verify' && (!accountChecked || Boolean(verificationIssue)))}
+        errorMessage={actionError} onConfirm={decide} onClose={() => { setDecision(null); setAccountChecked(false); }}>
+        {decision === 'verify' ? (
+          <>
+            <Typography component="span">Check the receiving Easypaisa, JazzCash or bank account history. A receipt image alone does not prove the transfer arrived.</Typography>
+            <FormControlLabel sx={{ mt: 2 }} control={<Checkbox checked={accountChecked} disabled={deciding} onChange={(_, checked) => setAccountChecked(checked)} />}
+              label="I checked the receiving account and matched the transaction reference and exact amount." />
+          </>
+        ) : 'Reject this pending claim? Its receipt and decision are retained. Rejection does not credit the contribution or refund money.'}
       </ConfirmDialog>
     </>
   );
+}
+
+export function PaymentDetailsDialog({ open, paymentId, ...props }: PaymentDetailsDialogProps) {
+  return open && paymentId ? <PaymentReview key={`${props.committeeId}-${paymentId}`} paymentId={paymentId} {...props} /> : null;
 }

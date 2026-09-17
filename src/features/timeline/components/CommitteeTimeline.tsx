@@ -63,6 +63,8 @@ function auditEventVisual(action: AuditAction): AuditEventVisual {
       return { label: 'Payment verified', icon: TaskAltOutlinedIcon, bg: 'success.main', fg: 'success.contrastText' };
     case 'PAYMENT_REJECTED':
       return { label: 'Payment claim rejected', icon: CancelOutlinedIcon, bg: 'error.main', fg: 'error.contrastText' };
+    case 'PAYMENT_RECEIPT_UPLOADED':
+      return { label: 'Payment receipt uploaded', icon: PaymentsOutlinedIcon, bg: 'info.main', fg: 'info.contrastText' };
     case 'CONTRIBUTION_STATUS_CHANGED':
       return { label: 'Contribution status changed', icon: PaymentsOutlinedIcon, bg: 'warning.main', fg: 'warning.contrastText' };
     case 'LOTTERY_EXECUTED':
@@ -71,6 +73,8 @@ function auditEventVisual(action: AuditAction): AuditEventVisual {
       return { label: 'Payout created', icon: AccountBalanceWalletOutlinedIcon, bg: 'secondary.main', fg: 'secondary.contrastText' };
     case 'PAYOUT_STATUS_CHANGED':
       return { label: 'Payout status changed', icon: PaidOutlinedIcon, bg: 'secondary.main', fg: 'secondary.contrastText' };
+    default:
+      return { label: String(action).replaceAll('_', ' '), icon: HistoryOutlinedIcon, bg: 'action.hover', fg: 'text.secondary' };
   }
 }
 

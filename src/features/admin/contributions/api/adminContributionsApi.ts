@@ -1,6 +1,8 @@
 import { baseApi } from '@/api/baseApi';
 import type { Contribution, Payment } from '@/types';
 import type {
+  GenerateContributionsParams,
+  GenerateContributionsResponse,
   MarkOverdueParams,
   MarkOverdueResponse,
   PaymentActionParams,
@@ -24,6 +26,13 @@ import type {
  */
 export const adminContributionsApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
+    generateContributions: builder.mutation<GenerateContributionsResponse, GenerateContributionsParams>({
+      query: ({ committeeId, cycleId }) => ({
+        url: `/committees/${committeeId}/cycles/${cycleId}/contributions/generate`,
+        method: 'POST',
+      }),
+      invalidatesTags: ['Contribution', 'Cycle', 'Report'],
+    }),
     /**
      * Get one contribution with its paying member.
      * GET /committees/:committeeId/cycles/:cycleId/contributions/:id
@@ -62,7 +71,7 @@ export const adminContributionsApi = baseApi.injectEndpoints({
      *   - contribution.status → PAID, paidAt stamped, paymentId linked
      *   - cycle.totalCollected incremented by the payment amount
      *   - PAYMENT_VERIFIED audit entry written
-     *   - member notified
+     * The backend attempts member notification after the transaction commits.
      * Every affected cache tag is invalidated so the UI always reflects the
      * authoritative backend state after the mutation resolves.
      */
@@ -71,7 +80,7 @@ export const adminContributionsApi = baseApi.injectEndpoints({
         url: `/committees/${committeeId}/payments/${id}/verify`,
         method: 'POST',
       }),
-      invalidatesTags: ['Payment', 'Contribution', 'Cycle', 'Audit', 'Notification'],
+      invalidatesTags: ['Payment', 'Contribution', 'Cycle', 'Audit', 'Notification', 'Report', 'Lottery'],
     }),
 
     /**
@@ -79,7 +88,8 @@ export const adminContributionsApi = baseApi.injectEndpoints({
      * POST /committees/:committeeId/payments/:id/reject  (no request body)
      *
      * Documented side effects: payment.status → REJECTED, verifiedAt stamped,
-     * PAYMENT_REJECTED audit entry written, member notified. The contribution
+     * PAYMENT_REJECTED audit entry written, then member notification attempted.
+     * The contribution
      * is intentionally left untouched (remains PENDING/OVERDUE) so the member
      * can submit a new claim.
      */
@@ -88,7 +98,8 @@ export const adminContributionsApi = baseApi.injectEndpoints({
         url: `/committees/${committeeId}/payments/${id}/reject`,
         method: 'POST',
       }),
-      invalidatesTags: ['Payment', 'Audit', 'Notification'],
+      // Refresh financial reads on failures too: another admin session may have approved it.
+      invalidatesTags: ['Payment', 'Contribution', 'Cycle', 'Audit', 'Notification', 'Report', 'Lottery'],
     }),
 
     /**
@@ -115,6 +126,7 @@ export const adminContributionsApi = baseApi.injectEndpoints({
 });
 
 export const {
+  useGenerateContributionsMutation,
   useGetContributionQuery,
   useMarkContributionsOverdueMutation,
   useVerifyPaymentMutation,

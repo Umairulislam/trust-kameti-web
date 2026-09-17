@@ -1,19 +1,19 @@
-'use client';
+"use client"
 
-import { useState } from 'react';
-import { Alert, Box, Paper } from '@mui/material';
-import { useAuth } from '@/features/auth';
-import { useGetContributionsQuery, useGetCyclesQuery } from '@/features/committees';
+import { useState } from "react"
+import { Alert, Box, Button, Paper } from "@mui/material"
+import { useAuth } from "@/features/auth"
+import { useGetContributionsQuery, useGetCyclesQuery } from "@/features/committees"
 import {
   PayContributionDialog,
   PaymentDetailsDialog,
   useGetPaymentsQuery,
-} from '@/features/payments';
-import { ContributionHistoryList } from './ContributionHistoryList';
-import { CurrentContributionCard } from './CurrentContributionCard';
+} from "@/features/payments"
+import { ContributionHistoryList } from "./ContributionHistoryList"
+import { CurrentContributionCard } from "./CurrentContributionCard"
 
 interface UserContributionsPanelProps {
-  committeeId: string;
+  committeeId: string
 }
 
 /**
@@ -22,18 +22,18 @@ interface UserContributionsPanelProps {
  * action) and the contribution history by cycle.
  */
 export function UserContributionsPanel({ committeeId }: UserContributionsPanelProps) {
-  const { user } = useAuth();
-  const [payDialogOpen, setPayDialogOpen] = useState(false);
-  const [detailsPaymentId, setDetailsPaymentId] = useState<string | null>(null);
+  const { user } = useAuth()
+  const [payDialogOpen, setPayDialogOpen] = useState(false)
+  const [detailsPaymentId, setDetailsPaymentId] = useState<string | null>(null)
 
   const {
     data: cyclesData,
     isLoading: cyclesLoading,
     isError: cyclesError,
     error: cyclesErrorData,
-  } = useGetCyclesQuery({ committeeId, limit: 50 });
+  } = useGetCyclesQuery({ committeeId, limit: 50 }, { refetchOnMountOrArgChange: true })
 
-  const activeCycle = cyclesData?.data.find((cycle) => cycle.status === 'ACTIVE');
+  const activeCycle = cyclesData?.data.find((cycle) => cycle.status === "ACTIVE")
 
   const {
     data: contributionsData,
@@ -41,61 +41,95 @@ export function UserContributionsPanel({ committeeId }: UserContributionsPanelPr
     isError: contributionsError,
     error: contributionsErrorData,
   } = useGetContributionsQuery(
-    { committeeId, cycleId: activeCycle?.id ?? '', limit: 100 },
-    { skip: !activeCycle },
-  );
+    { committeeId, cycleId: activeCycle?.id ?? "", limit: 100 },
+    { skip: !activeCycle, refetchOnMountOrArgChange: true }
+  )
 
   // Payment claims provide the awaiting-verification / rejected context
   // for the current contribution card.
-  const { data: payments } = useGetPaymentsQuery({ committeeId });
+  const {
+    currentData: payments,
+    isFetching: paymentsFetching,
+    isError: paymentsError,
+    refetch: refetchPayments,
+  } = useGetPaymentsQuery({ committeeId }, { refetchOnMountOrArgChange: true })
 
   const myContribution = contributionsData?.data.find(
-    (contribution) => contribution.member?.user?.id === user?.id,
-  );
+    (contribution) => Boolean(user?.id) && contribution.member?.user?.id === user?.id
+  )
 
   // Payments are listed newest first, so this is the latest claim.
   const myLatestPayment = myContribution
     ? payments?.find((payment) => payment.contributionId === myContribution.id)
-    : undefined;
+    : undefined
 
   if (cyclesLoading) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
         <Paper sx={{ p: 3 }}>
-          <Box sx={{ height: 20, bgcolor: 'action.hover', borderRadius: 1, mb: 2, width: '35%' }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
+          <Box sx={{ height: 20, bgcolor: "action.hover", borderRadius: 1, mb: 2, width: "35%" }} />
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2 }}>
             {[1, 2, 3].map((i) => (
               <Box key={i}>
-                <Box sx={{ height: 12, bgcolor: 'action.hover', borderRadius: 1, mb: 0.5, width: '60%' }} />
-                <Box sx={{ height: 24, bgcolor: 'action.hover', borderRadius: 1, width: '50%' }} />
+                <Box
+                  sx={{
+                    height: 12,
+                    bgcolor: "action.hover",
+                    borderRadius: 1,
+                    mb: 0.5,
+                    width: "60%",
+                  }}
+                />
+                <Box sx={{ height: 24, bgcolor: "action.hover", borderRadius: 1, width: "50%" }} />
               </Box>
             ))}
           </Box>
         </Paper>
         <Paper sx={{ p: 2.5 }}>
-          <Box sx={{ height: 20, bgcolor: 'action.hover', borderRadius: 1, mb: 2, width: '35%' }} />
+          <Box sx={{ height: 20, bgcolor: "action.hover", borderRadius: 1, mb: 2, width: "35%" }} />
           {[1, 2, 3].map((i) => (
-            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1.5 }}>
-              <Box sx={{ width: 36, height: 36, borderRadius: '50%', bgcolor: 'action.hover' }} />
+            <Box key={i} sx={{ display: "flex", alignItems: "center", gap: 2, py: 1.5 }}>
+              <Box sx={{ width: 36, height: 36, borderRadius: "50%", bgcolor: "action.hover" }} />
               <Box sx={{ flex: 1 }}>
-                <Box sx={{ height: 14, bgcolor: 'action.hover', borderRadius: 1, mb: 0.5, width: '40%' }} />
-                <Box sx={{ height: 12, bgcolor: 'action.hover', borderRadius: 1, width: '60%' }} />
+                <Box
+                  sx={{
+                    height: 14,
+                    bgcolor: "action.hover",
+                    borderRadius: 1,
+                    mb: 0.5,
+                    width: "40%",
+                  }}
+                />
+                <Box sx={{ height: 12, bgcolor: "action.hover", borderRadius: 1, width: "60%" }} />
               </Box>
             </Box>
           ))}
         </Paper>
       </Box>
-    );
+    )
   }
 
   if (cyclesError) {
-    const errorMessage = (cyclesErrorData as { data?: { message?: string } })?.data?.message
-      ?? 'Failed to load contributions. Please try again.';
-    return <Alert severity="error">{errorMessage}</Alert>;
+    const errorMessage =
+      (cyclesErrorData as { data?: { message?: string } })?.data?.message ??
+      "Failed to load contributions. Please try again."
+    return <Alert severity="error">{errorMessage}</Alert>
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      {paymentsError && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" onClick={() => refetchPayments()}>
+              Retry
+            </Button>
+          }
+        >
+          Could not check existing payment claims. Retry before submitting a new claim.
+        </Alert>
+      )}
       {/* Current contribution */}
       {!activeCycle ? (
         <Alert severity="info">
@@ -103,20 +137,28 @@ export function UserContributionsPanel({ committeeId }: UserContributionsPanelPr
         </Alert>
       ) : contributionsLoading ? (
         <Paper sx={{ p: 3 }}>
-          <Box sx={{ height: 20, bgcolor: 'action.hover', borderRadius: 1, mb: 2, width: '35%' }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
+          <Box sx={{ height: 20, bgcolor: "action.hover", borderRadius: 1, mb: 2, width: "35%" }} />
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2 }}>
             {[1, 2, 3].map((i) => (
               <Box key={i}>
-                <Box sx={{ height: 12, bgcolor: 'action.hover', borderRadius: 1, mb: 0.5, width: '60%' }} />
-                <Box sx={{ height: 24, bgcolor: 'action.hover', borderRadius: 1, width: '50%' }} />
+                <Box
+                  sx={{
+                    height: 12,
+                    bgcolor: "action.hover",
+                    borderRadius: 1,
+                    mb: 0.5,
+                    width: "60%",
+                  }}
+                />
+                <Box sx={{ height: 24, bgcolor: "action.hover", borderRadius: 1, width: "50%" }} />
               </Box>
             ))}
           </Box>
         </Paper>
       ) : contributionsError ? (
         <Alert severity="error">
-          {(contributionsErrorData as { data?: { message?: string } })?.data?.message
-            ?? 'Failed to load your contribution. Please try again.'}
+          {(contributionsErrorData as { data?: { message?: string } })?.data?.message ??
+            "Failed to load your contribution. Please try again."}
         </Alert>
       ) : !myContribution ? (
         <Alert severity="info">
@@ -127,6 +169,7 @@ export function UserContributionsPanel({ committeeId }: UserContributionsPanelPr
           contribution={myContribution}
           cycleNumber={activeCycle.cycleNumber}
           latestPayment={myLatestPayment}
+          paymentCheckPending={paymentsFetching || paymentsError}
           onPay={() => setPayDialogOpen(true)}
           onViewPayment={(paymentId) => setDetailsPaymentId(paymentId)}
         />
@@ -147,6 +190,7 @@ export function UserContributionsPanel({ committeeId }: UserContributionsPanelPr
           committeeId={committeeId}
           contribution={myContribution}
           cycleNumber={activeCycle?.cycleNumber}
+          pendingPayment={myLatestPayment?.status === "PENDING" ? myLatestPayment : undefined}
         />
       )}
 
@@ -158,5 +202,5 @@ export function UserContributionsPanel({ committeeId }: UserContributionsPanelPr
         cycles={cyclesData?.data ?? []}
       />
     </Box>
-  );
+  )
 }

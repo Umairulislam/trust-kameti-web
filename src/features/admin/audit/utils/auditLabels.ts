@@ -7,6 +7,7 @@ export const AUDIT_LABELS: Record<AuditAction, string> = {
   MEMBER_INVITED: 'Member invited',
   MEMBER_JOINED: 'Member joined',
   MEMBER_REMOVED: 'Member removed',
+  PAYMENT_RECEIPT_UPLOADED: 'Payment receipt uploaded',
   PAYMENT_VERIFIED: 'Payment verified',
   PAYMENT_REJECTED: 'Payment rejected',
   CONTRIBUTION_STATUS_CHANGED: 'Contribution status changed',

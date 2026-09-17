@@ -30,6 +30,7 @@ import SearchOffOutlinedIcon from '@mui/icons-material/SearchOffOutlined';
 import type { Cycle, PaymentVerificationStatus } from '@/types';
 import { formatCurrency, formatDateTime, getInitials } from '@/utils';
 import { useGetPaymentsQuery } from '@/features/payments';
+import { PAYMENT_METHOD_LABELS, paymentError, paymentStatusLabel } from '@/features/payments/utils/paymentPresentation';
 import {
   contributionStatusColor,
   paymentStatusColor,
@@ -46,6 +47,7 @@ const STATUS_FILTERS: Array<PaymentVerificationStatus | 'ALL'> = [
 ];
 
 interface PaymentsTabProps {
+  canManage: boolean;
   committeeId: string;
   /** Committee cycles, used only to label which cycle each payment belongs to. */
   cycles: Cycle[];
@@ -65,34 +67,36 @@ function cycleNameFor(cycles: Cycle[], cycleId: string | undefined): string {
  * client-side. Verification and rejection happen in the details dialog through
  * the documented POST .../verify and POST .../reject endpoints.
  */
-export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
+export function PaymentsTab({ committeeId, cycles, canManage }: PaymentsTabProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<PaymentVerificationStatus | 'ALL'>('ALL');
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [receiptFilter, setReceiptFilter] = useState<'ALL' | 'ATTACHED' | 'MISSING'>('ALL');
 
-  const { data, isLoading, isFetching, isError, error, refetch } = useGetPaymentsQuery({
+  const { currentData: data, isLoading, isFetching, isError, error, refetch } = useGetPaymentsQuery({
     committeeId,
     status: statusFilter === 'ALL' ? undefined : statusFilter,
-  });
+  }, { refetchOnMountOrArgChange: true });
 
   const payments = useMemo(() => data ?? [], [data]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return payments;
     return payments.filter((payment) =>
+      (receiptFilter === 'ALL' || (receiptFilter === 'ATTACHED' ? Boolean(payment.receipt) : !payment.receipt)) &&
       `${payment.contribution?.member?.user?.name ?? ''} ${
         payment.contribution?.member?.user?.email ?? ''
       } ${payment.transactionReference}`
         .toLowerCase()
         .includes(term),
     );
-  }, [payments, search]);
+  }, [payments, search, receiptFilter]);
 
-  const filtersActive = statusFilter !== 'ALL' || search.trim() !== '';
+  const filtersActive = statusFilter !== 'ALL' || search.trim() !== '' || receiptFilter !== 'ALL';
   const clearFilters = () => {
     setSearch('');
     setStatusFilter('ALL');
+    setReceiptFilter('ALL');
   };
 
   const pendingCount = useMemo(
@@ -109,6 +113,7 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
             display: 'flex',
             flexDirection: { xs: 'column', sm: 'row' },
             gap: 2,
+            flexWrap: 'wrap',
             alignItems: { sm: 'center' },
           }}
         >
@@ -146,10 +151,17 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
               ))}
             </Select>
           </FormControl>
+          <TextField select size="small" label="Receipt" value={receiptFilter} sx={{ minWidth: 170 }}
+            onChange={(event) => setReceiptFilter(event.target.value as 'ALL' | 'ATTACHED' | 'MISSING')}>
+            <MenuItem value="ALL">All receipts</MenuItem>
+            <MenuItem value="ATTACHED">Attached</MenuItem>
+            <MenuItem value="MISSING">Missing</MenuItem>
+          </TextField>
+          <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} disabled={isFetching} onClick={() => refetch()}>Refresh</Button>
         </Box>
       </Paper>
 
-      {isLoading ? (
+      {isLoading || (!data && isFetching) ? (
         <Paper sx={{ p: 2 }}>
           {[0, 1, 2, 3, 4].map((key) => (
             <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1.5 }}>
@@ -166,8 +178,7 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
       ) : isError ? (
         <Paper sx={{ p: 3 }}>
           <Alert severity="error" sx={{ mb: 2 }}>
-            {(error as { data?: { message?: string } })?.data?.message ??
-              'Failed to load payments. Please try again.'}
+            {paymentError(error)}
           </Alert>
           <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={() => refetch()}>
             Retry
@@ -205,7 +216,7 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {isFetching ? 'Updating…' : `Showing ${visible.length} payments`}
             {statusFilter === 'ALL' && pendingCount > 0
-              ? ` · ${pendingCount} awaiting verification`
+              ? ` · ${pendingCount} pending claims`
               : ''}
           </Typography>
           <TableContainer component={Paper}>
@@ -215,8 +226,10 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
                   <TableCell>Member</TableCell>
                   <TableCell align="right">Amount</TableCell>
                   <TableCell>Reference</TableCell>
+                  <TableCell>Method</TableCell>
+                  <TableCell>Receipt</TableCell>
                   <TableCell>Cycle</TableCell>
-                  <TableCell>Paid at</TableCell>
+                  <TableCell>Claim recorded</TableCell>
                   <TableCell>Payment</TableCell>
                   <TableCell>Contribution</TableCell>
                   <TableCell align="right">Actions</TableCell>
@@ -255,10 +268,12 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary" noWrap>
+                      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere', maxWidth: 240 }}>
                         {payment.transactionReference}
                       </Typography>
                     </TableCell>
+                    <TableCell>{payment.paymentMethod ? PAYMENT_METHOD_LABELS[payment.paymentMethod] ?? 'Not recorded' : 'Not recorded'}</TableCell>
+                    <TableCell>{payment.receipt ? 'Attached' : 'Missing'}</TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">
                         {cycleNameFor(cycles, payment.contribution?.cycleId)}
@@ -271,7 +286,7 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={payment.status}
+                        label={paymentStatusLabel(payment)}
                         size="small"
                         color={paymentStatusColor(payment.status)}
                       />
@@ -309,6 +324,7 @@ export function PaymentsTab({ committeeId, cycles }: PaymentsTabProps) {
         committeeId={committeeId}
         paymentId={detailsId}
         cycles={cycles}
+        canManage={canManage}
       />
     </Box>
   );

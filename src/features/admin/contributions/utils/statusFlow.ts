@@ -69,9 +69,8 @@ export function canMarkOverdue(cycleStatus: CycleStatus): boolean {
 }
 
 /**
- * UPCOMING cycles never have generated contributions (the backend creates them
- * only when the cycle becomes ACTIVE), so the cycle selector defaults to the
- * newest non-UPCOMING cycle.
+ * Contributions can be generated explicitly only while a cycle is ACTIVE.
+ * Completed/cancelled cycles can still contain historical contributions.
  */
 export function isContributionBearingCycle(status: CycleStatus): boolean {
   return status !== 'UPCOMING';

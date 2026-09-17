@@ -4,6 +4,7 @@
  * Contribution and payment record shapes already live in `@/types` and are
  * reused verbatim. This module only adds the admin-specific request/response
  * shapes for the documented mutations:
+ *   POST /committees/:cid/cycles/:cycleId/contributions/generate
  *   POST /committees/:cid/cycles/:cycleId/contributions/mark-overdue
  *   POST /committees/:cid/payments/:id/verify
  *   POST /committees/:cid/payments/:id/reject
@@ -11,7 +12,17 @@
  *
  * Field names come straight from docs/api-documentation.md — nothing invented.
  */
-import type { NotificationType } from '@/types';
+import type { Contribution, NotificationType } from '@/types';
+
+export interface GenerateContributionsParams {
+  committeeId: string;
+  cycleId: string;
+}
+
+export interface GenerateContributionsResponse {
+  generated: number;
+  contributions: Omit<Contribution, 'member'>[];
+}
 
 /** Response from POST /committees/:cid/cycles/:cycleId/contributions/mark-overdue. */
 export interface MarkOverdueResponse {

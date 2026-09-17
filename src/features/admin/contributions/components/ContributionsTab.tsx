@@ -12,6 +12,7 @@ import {
   InputLabel,
   MenuItem,
   Paper,
+  Pagination,
   Select,
   Skeleton,
   Table,
@@ -32,6 +33,10 @@ import SearchOffOutlinedIcon from '@mui/icons-material/SearchOffOutlined';
 import type { ContributionStatus, Cycle } from '@/types';
 import { formatCurrency, formatDate, getInitials } from '@/utils';
 import { useGetContributionSummaryQuery, useGetContributionsQuery } from '@/features/committees';
+import { useGetPaymentsQuery } from '@/features/payments';
+import { GenerateContributionsAction } from './GenerateContributionsAction';
+import { ContributionPaymentAction } from './ContributionPaymentAction';
+import { adminPaymentError } from '../utils/paymentActions';
 import { useMarkContributionsOverdueMutation } from '../api/adminContributionsApi';
 import {
   canMarkOverdue,
@@ -50,6 +55,7 @@ const STATUS_FILTERS: Array<ContributionStatus | 'ALL'> = ['ALL', 'PENDING', 'PA
 const LIST_LIMIT = 100;
 
 interface ContributionsTabProps {
+  canManage: boolean;
   committeeId: string;
   committeeName: string;
   /** All committee cycles (backend order: cycle number ascending). */
@@ -65,11 +71,11 @@ interface ContributionsTabProps {
  *
  * Reads GET /committees/:cid/cycles/:cycleId/contributions (status is a
  * documented server-side filter; member search is client-side) and the cycle
- * summary endpoint. The only mutations are the documented admin actions:
- * mark-overdue (behind a confirmation dialog) and the payment-reminder
- * broadcast.
+ * summary endpoint. Documented actions cover contribution generation,
+ * payment claims and reviews, marking overdue, and committee reminders.
  */
 export function ContributionsTab({
+  canManage,
   committeeId,
   committeeName,
   cycles,
@@ -82,22 +88,25 @@ export function ContributionsTab({
   const [overdueConfirmOpen, setOverdueConfirmOpen] = useState(false);
   const [overdueError, setOverdueError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const [markOverdue, overdueResult] = useMarkContributionsOverdueMutation();
 
   const cycleId = cycle?.id ?? null;
 
   const {
-    data: summary,
+    currentData: summary,
     isLoading: summaryLoading,
+    isFetching: summaryFetching,
     isError: summaryError,
+    refetch: refetchSummary,
   } = useGetContributionSummaryQuery(
     { committeeId, cycleId: cycleId ?? '' },
-    { skip: !cycleId },
+    { skip: !cycleId, refetchOnMountOrArgChange: true },
   );
 
   const {
-    data,
+    currentData: data,
     isLoading,
     isFetching,
     isError,
@@ -109,8 +118,13 @@ export function ContributionsTab({
       cycleId: cycleId ?? '',
       status: statusFilter === 'ALL' ? undefined : statusFilter,
       limit: LIST_LIMIT,
+      page,
     },
-    { skip: !cycleId },
+    { skip: !cycleId, refetchOnMountOrArgChange: true },
+  );
+
+  const { currentData: payments, isFetching: paymentsFetching, isError: paymentsError, refetch: refetchPayments } = useGetPaymentsQuery(
+    { committeeId }, { refetchOnMountOrArgChange: true },
   );
 
   const contributions = useMemo(() => data?.data ?? [], [data]);
@@ -128,12 +142,13 @@ export function ContributionsTab({
 
   const filtersActive = statusFilter !== 'ALL' || search.trim() !== '';
   const clearFilters = () => {
+    setPage(1);
     setSearch('');
     setStatusFilter('ALL');
   };
 
   const handleMarkOverdue = async () => {
-    if (!cycleId) return;
+    if (!cycleId || !cycle || !canManage || !canMarkOverdue(cycle.status) || overdueResult.isLoading) return;
     setOverdueError(null);
     try {
       const response = await markOverdue({ committeeId, cycleId }).unwrap();
@@ -144,8 +159,7 @@ export function ContributionsTab({
       );
       setOverdueConfirmOpen(false);
     } catch (err: unknown) {
-      const e = err as { data?: { message?: string } };
-      setOverdueError(e.data?.message ?? 'Failed to mark contributions overdue. Please try again.');
+      setOverdueError(adminPaymentError(err, 'review'));
     }
   };
 
@@ -158,8 +172,7 @@ export function ContributionsTab({
           No cycles yet
         </Typography>
         <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 480, mx: 'auto' }}>
-          Contributions are organised per cycle. Cycles and their contributions are created by the
-          cycle management workflow once the committee is running.
+          Create cycles in Cycle Management, then return here to generate contributions for the active cycle.
         </Typography>
       </Paper>
     );
@@ -188,7 +201,7 @@ export function ContributionsTab({
               variant="outlined"
               color="warning"
               startIcon={<EventBusyOutlinedIcon />}
-              disabled={!cycle || !canMarkOverdue(cycle.status)}
+              disabled={!canManage || !cycle || !canMarkOverdue(cycle.status) || overdueResult.isLoading}
               onClick={() => {
                 setOverdueError(null);
                 setOverdueConfirmOpen(true);
@@ -200,6 +213,7 @@ export function ContributionsTab({
               variant="contained"
               startIcon={<NotificationsActiveOutlinedIcon />}
               onClick={() => setReminderOpen(true)}
+              disabled={!canManage}
             >
               Send Reminder
             </Button>
@@ -216,6 +230,12 @@ export function ContributionsTab({
         )}
       </Paper>
 
+      {cycle && <GenerateContributionsAction key={cycle.id} committeeId={committeeId} cycle={cycle}
+        summary={summaryError ? undefined : summary} checking={summaryFetching} canManage={canManage} onRefresh={() => refetchSummary()} />}
+      {paymentsError && <Alert severity="warning" sx={{ mb: 2 }} action={<Button color="inherit" onClick={() => refetchPayments()}>Retry</Button>}>
+        Existing payment claims could not be checked. Payment recording is disabled until this check succeeds.
+      </Alert>}
+
       {successMessage && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccessMessage(null)}>
           {successMessage}
@@ -229,8 +249,7 @@ export function ContributionsTab({
             This cycle has not started yet
           </Typography>
           <Typography variant="body2" color="text.disabled">
-            Contributions are created by the backend when the cycle becomes ACTIVE. Pick a started
-            cycle to review member contribution status.
+            Start the cycle in Cycle Management, then use Generate contributions here. Contributions are not created automatically when a cycle starts.
           </Typography>
         </Paper>
       ) : (
@@ -279,7 +298,7 @@ export function ContributionsTab({
                   label="Status"
                   value={statusFilter}
                   onChange={(event) =>
-                    setStatusFilter(event.target.value as ContributionStatus | 'ALL')
+                    { setStatusFilter(event.target.value as ContributionStatus | 'ALL'); setPage(1); }
                   }
                 >
                   {STATUS_FILTERS.map((status) => (
@@ -289,10 +308,11 @@ export function ContributionsTab({
                   ))}
                 </Select>
               </FormControl>
+              <Button variant="outlined" disabled={isFetching || summaryFetching || paymentsFetching} onClick={() => { refetch(); refetchSummary(); refetchPayments(); }}>Refresh</Button>
             </Box>
           </Paper>
 
-          {isLoading ? (
+          {isLoading || (!data && isFetching) ? (
             <Paper sx={{ p: 2 }}>
               {[0, 1, 2, 3, 4].map((key) => (
                 <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1.5 }}>
@@ -331,7 +351,7 @@ export function ContributionsTab({
                     No contributions in this cycle
                   </Typography>
                   <Typography variant="body2" color="text.disabled">
-                    The backend creates one contribution per active member when the cycle starts.
+                    {cycle?.status === 'ACTIVE' ? 'Use Generate contributions above to create payment obligations for active members.' : 'No contributions were recorded for this cycle.'}
                   </Typography>
                 </>
               ) : (
@@ -353,7 +373,7 @@ export function ContributionsTab({
             <>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 {isFetching ? 'Updating…' : `Showing ${visible.length} of ${total} contributions`}
-                {total > contributions.length ? ` (first ${contributions.length} loaded)` : ''}
+                {total > contributions.length ? ` (page ${page}; search applies to this page)` : ''}
               </Typography>
               <TableContainer component={Paper}>
                 <Table size="small" sx={{ minWidth: 720 }}>
@@ -364,6 +384,7 @@ export function ContributionsTab({
                       <TableCell>Due date</TableCell>
                       <TableCell>Paid on</TableCell>
                       <TableCell>Status</TableCell>
+                      <TableCell align="right">Payment action</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -415,6 +436,10 @@ export function ContributionsTab({
                             color={contributionStatusColor(contribution.status)}
                           />
                         </TableCell>
+                        <TableCell align="right">
+                          {cycle && <ContributionPaymentAction committeeId={committeeId} contribution={contribution} cycle={cycle}
+                            payments={payments ?? []} checking={paymentsFetching || paymentsError || isFetching} canManage={canManage} />}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -422,6 +447,8 @@ export function ContributionsTab({
               </TableContainer>
             </>
           )}
+          {total > LIST_LIMIT && <Pagination sx={{ mt: 2 }} count={Math.ceil(total / LIST_LIMIT)} page={page}
+            onChange={(_, nextPage) => { setPage(nextPage); setSearch(''); }} disabled={isFetching} aria-label="Contribution pages" />}
         </>
       )}
 

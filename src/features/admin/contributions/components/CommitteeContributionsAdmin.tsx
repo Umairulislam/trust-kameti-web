@@ -22,6 +22,8 @@ import { AdminPageContainer } from '@/components/layout/admin';
 import { useGetCommitteeQuery } from '@/features/admin/committees';
 import { committeeStatusColor } from '@/features/admin/committees/utils/statusFlow';
 import { useGetCyclesQuery } from '@/features/committees';
+import { useAuth } from '@/features/auth';
+import { canManageCommitteePayments } from '../utils/paymentActions';
 import { formatCurrency } from '@/utils';
 import { isContributionBearingCycle } from '../utils/statusFlow';
 import { ContributionsTab } from './ContributionsTab';
@@ -40,6 +42,7 @@ const LIST_LIMIT = 100;
  * Selected-cycle state lives here so it survives tab switches.
  */
 export function CommitteeContributionsAdmin() {
+  const { user } = useAuth();
   const params = useParams();
   const committeeId = params.committeeId as string;
   const [tab, setTab] = useState(0);
@@ -63,9 +66,11 @@ export function CommitteeContributionsAdmin() {
 
   const cycles = useMemo(() => cyclesData?.data ?? [], [cyclesData]);
 
-  // Default to the newest contribution-bearing cycle (UPCOMING cycles have no
-  // contributions). The user's explicit choice always wins once made.
+  // Prioritise the active cycle, then the newest contribution-bearing cycle.
+  // The user's explicit choice always wins once made.
   const defaultCycleId = useMemo(() => {
+    const active = cycles.find((item) => item.status === 'ACTIVE');
+    if (active) return active.id;
     for (let index = cycles.length - 1; index >= 0; index -= 1) {
       if (isContributionBearingCycle(cycles[index].status)) return cycles[index].id;
     }
@@ -197,6 +202,8 @@ export function CommitteeContributionsAdmin() {
 
           {tab === 0 ? (
             <ContributionsTab
+              key={`${committee.id}-${cycle?.id ?? 'none'}`}
+              canManage={canManageCommitteePayments(user, committee.createdBy)}
               committeeId={committee.id}
               committeeName={committee.name}
               cycles={cycles}
@@ -204,7 +211,7 @@ export function CommitteeContributionsAdmin() {
               onCycleChange={setSelectedCycleId}
             />
           ) : (
-            <PaymentsTab committeeId={committee.id} cycles={cycles} />
+            <PaymentsTab key={committee.id} committeeId={committee.id} cycles={cycles} canManage={canManageCommitteePayments(user, committee.createdBy)} />
           )}
         </>
       )}

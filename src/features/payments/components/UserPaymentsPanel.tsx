@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, Box, Paper, Typography } from '@mui/material';
+import { Alert, Box, Button, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
+import type { PaymentVerificationStatus } from '@/types';
+import { paymentError } from '../utils/paymentPresentation';
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 import { useAuth } from '@/features/auth';
 import { useGetCyclesQuery } from '@/features/committees';
@@ -21,23 +23,29 @@ interface UserPaymentsPanelProps {
 export function UserPaymentsPanel({ committeeId }: UserPaymentsPanelProps) {
   const { user } = useAuth();
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const [status, setStatus] = useState<PaymentVerificationStatus | 'ALL'>('ALL');
 
   const {
-    data: payments,
+    currentData: payments,
     isLoading,
+    isFetching,
     isError,
     error,
-  } = useGetPaymentsQuery({ committeeId });
+    refetch,
+  } = useGetPaymentsQuery({ committeeId }, { refetchOnMountOrArgChange: true });
 
   const {
     data: cyclesData,
     isLoading: cyclesLoading,
+    isError: cyclesError,
+    refetch: refetchCycles,
   } = useGetCyclesQuery({ committeeId, limit: 50 });
 
   // The endpoint lists committee-wide payments; show only the current user's.
   const myPayments = (payments ?? []).filter(
-    (payment) => payment.contribution?.member?.user?.id === user?.id,
+    (payment) => Boolean(user?.id) && payment.contribution?.member?.user?.id === user?.id,
   );
+  const filteredPayments = myPayments.filter((payment) => status === 'ALL' || payment.status === status);
 
   if (isLoading || cyclesLoading) {
     return (
@@ -59,26 +67,35 @@ export function UserPaymentsPanel({ committeeId }: UserPaymentsPanelProps) {
   }
 
   if (isError) {
-    const errorMessage = (error as { data?: { message?: string } })?.data?.message
-      ?? 'Failed to load payments. Please try again.';
-    return <Alert severity="error">{errorMessage}</Alert>;
+    return <Alert severity="error" action={<Button color="inherit" onClick={() => refetch()}>Retry</Button>}>{paymentError(error)}</Alert>;
   }
 
   return (
-    <Box>
-      {myPayments.length === 0 ? (
+    <Stack spacing={2}>
+      <Alert severity="info">Transfer money manually, then submit your reference and receipt from Contributions. Claims and receipts do not settle your dues until the admin approves them.</Alert>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <TextField select size="small" label="Payment status" value={status} onChange={(event) => setStatus(event.target.value as PaymentVerificationStatus | 'ALL')} sx={{ minWidth: 200 }}>
+          <MenuItem value="ALL">All claims</MenuItem>
+          <MenuItem value="PENDING">Pending</MenuItem>
+          <MenuItem value="VERIFIED">Verified</MenuItem>
+          <MenuItem value="REJECTED">Rejected</MenuItem>
+        </TextField>
+        <Button variant="outlined" disabled={isFetching} onClick={() => refetch()}>{isFetching ? 'Refreshing…' : 'Refresh payments'}</Button>
+      </Stack>
+      {cyclesError && <Alert severity="warning" action={<Button color="inherit" onClick={() => refetchCycles()}>Retry</Button>}>Cycle numbers could not be loaded. Your payment records are still available.</Alert>}
+      {filteredPayments.length === 0 ? (
         <Paper sx={{ py: 8, textAlign: 'center' }}>
           <ReceiptLongOutlinedIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
           <Typography variant="h6" color="text.secondary" gutterBottom>
-            No payments yet
+            {myPayments.length === 0 ? 'No payment claims yet' : 'No claims match this status'}
           </Typography>
           <Typography variant="body2" color="text.disabled">
-            Your payment records will appear here after you pay a contribution.
+            {myPayments.length === 0 ? 'After transferring money, open Contributions to submit your payment proof.' : 'Choose another status to view your claims.'}
           </Typography>
         </Paper>
       ) : (
         <PaymentsList
-          payments={myPayments}
+          payments={filteredPayments}
           cycles={cyclesData?.data ?? []}
           onSelect={setSelectedPaymentId}
         />
@@ -91,6 +108,6 @@ export function UserPaymentsPanel({ committeeId }: UserPaymentsPanelProps) {
         paymentId={selectedPaymentId}
         cycles={cyclesData?.data ?? []}
       />
-    </Box>
+    </Stack>
   );
 }

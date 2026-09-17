@@ -1,6 +1,7 @@
 export { ContributionsAdmin } from './components/ContributionsAdmin';
 export { CommitteeContributionsAdmin } from './components/CommitteeContributionsAdmin';
 export {
+  useGenerateContributionsMutation,
   useGetContributionQuery,
   useMarkContributionsOverdueMutation,
   useVerifyPaymentMutation,
@@ -8,6 +9,8 @@ export {
   useSendCommitteeNotificationMutation,
 } from './api/adminContributionsApi';
 export type {
+  GenerateContributionsParams,
+  GenerateContributionsResponse,
   MarkOverdueParams,
   MarkOverdueResponse,
   PaymentActionParams,

@@ -22,6 +22,15 @@ export type ContributionStatus = 'PENDING' | 'PAID' | 'OVERDUE';
 /** Payment verification statuses. */
 export type PaymentVerificationStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 
+export type PaymentMethod = 'EASYPAISA' | 'JAZZCASH' | 'BANK_TRANSFER' | 'OTHER';
+
+export interface PaymentReceipt {
+  id: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  size: number;
+  uploadedAt: string;
+}
+
 /** Payout statuses. */
 export type PayoutStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -56,6 +65,7 @@ export type AuditAction =
   | 'MEMBER_INVITED'
   | 'MEMBER_JOINED'
   | 'MEMBER_REMOVED'
+  | 'PAYMENT_RECEIPT_UPLOADED'
   | 'PAYMENT_VERIFIED'
   | 'PAYMENT_REJECTED'
   | 'CONTRIBUTION_STATUS_CHANGED'
@@ -141,7 +151,10 @@ export interface Contribution {
 export type PaymentContribution = Pick<
   Contribution,
   'id' | 'cycleId' | 'memberId' | 'amount' | 'status'
-> & { member?: Member };
+> & {
+  member?: Pick<Member, 'id' | 'role' | 'status' | 'user'>;
+  cycle?: Pick<Cycle, 'committeeId' | 'status'>;
+};
 
 /** Payment record as returned by the payments endpoints. */
 export interface Payment {
@@ -150,6 +163,8 @@ export interface Payment {
   memberId: string;
   amount: string;
   transactionReference: string;
+  paymentMethod: PaymentMethod | null;
+  receipt: PaymentReceipt | null;
   status: PaymentVerificationStatus;
   paidAt: string;
   verifiedAt: string | null;

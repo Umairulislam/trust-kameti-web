@@ -1,4 +1,6 @@
 export { PayContributionDialog } from './components/PayContributionDialog';
+export { ReceiptPreview } from './components/ReceiptPreview';
+export { ReceiptUpload } from './components/ReceiptUpload';
 export { PaymentsList } from './components/PaymentsList';
 export { PaymentDetailsDialog } from './components/PaymentDetailsDialog';
 export { UserPaymentsPanel } from './components/UserPaymentsPanel';

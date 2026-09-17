@@ -21,6 +21,7 @@ export interface ConfirmDialogProps {
   /** MUI button color for the confirm action. */
   confirmColor?: 'primary' | 'error' | 'warning' | 'success';
   loading?: boolean;
+  confirmDisabled?: boolean;
   /** Server error to surface inside the dialog. */
   errorMessage?: string | null;
   onConfirm: () => void;
@@ -41,6 +42,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   confirmColor = 'primary',
   loading = false,
+  confirmDisabled = false,
   errorMessage = null,
   onConfirm,
   onClose,
@@ -60,7 +62,7 @@ export function ConfirmDialog({
         <Button onClick={onClose} disabled={loading} color="inherit">
           {cancelLabel}
         </Button>
-        <Button onClick={onConfirm} disabled={loading} color={confirmColor} variant="contained">
+        <Button onClick={onConfirm} disabled={loading || confirmDisabled} color={confirmColor} variant="contained">
           {loading ? <CircularProgress size={18} /> : confirmLabel}
         </Button>
       </DialogActions>

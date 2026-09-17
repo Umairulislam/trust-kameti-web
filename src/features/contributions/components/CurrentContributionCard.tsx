@@ -20,6 +20,7 @@ interface CurrentContributionCardProps {
   cycleNumber: number;
   /** The user's newest payment claim for this contribution, if any. */
   latestPayment?: Payment;
+  paymentCheckPending?: boolean;
   onPay: () => void;
   onViewPayment: (paymentId: string) => void;
 }
@@ -46,12 +47,14 @@ export function CurrentContributionCard({
   contribution,
   cycleNumber,
   latestPayment,
+  paymentCheckPending,
   onPay,
   onViewPayment,
 }: CurrentContributionCardProps) {
   const isPaid = contribution.status === 'PAID';
   // A submitted claim is still awaiting the admin's verification.
   const awaitingVerification = !isPaid && latestPayment?.status === 'PENDING';
+  const needsReceipt = awaitingVerification && !latestPayment?.receipt;
   const lastClaimRejected = !isPaid && latestPayment?.status === 'REJECTED';
 
   return (
@@ -150,26 +153,25 @@ export function CurrentContributionCard({
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {awaitingVerification && (
-            <Alert severity="info">
+            <Alert severity="info" sx={{ overflowWrap: 'anywhere' }}>
               Payment submitted on {formatDate(latestPayment?.paidAt)} — Ref:{' '}
-              {latestPayment?.transactionReference}. Awaiting verification by the
-              committee admin.
+              {latestPayment?.transactionReference}. {needsReceipt ? 'Upload your receipt to complete this claim.' : 'Receipt attached. Awaiting verification by the committee admin.'}
             </Alert>
           )}
           {lastClaimRejected && (
             <Alert severity="warning">
               Your last payment claim (Ref: {latestPayment?.transactionReference}) was
-              rejected on {formatDate(latestPayment?.verifiedAt)}. Record a new payment
-              below.
+              rejected on {formatDate(latestPayment?.verifiedAt)}. Check with your admin,
+              then submit a new claim and receipt below.
             </Alert>
           )}
           <Box>
             <Button
-              onClick={onPay}
-              disabled={awaitingVerification}
+              onClick={() => awaitingVerification && latestPayment ? onViewPayment(latestPayment.id) : onPay()}
+              disabled={paymentCheckPending}
               startIcon={awaitingVerification ? undefined : <PaymentsOutlinedIcon />}
             >
-              {awaitingVerification ? 'Payment Awaiting Verification' : 'Pay Contribution'}
+              {paymentCheckPending ? 'Checking payment status…' : needsReceipt ? 'Upload receipt' : awaitingVerification ? 'View payment claim' : 'Submit payment proof'}
             </Button>
           </Box>
         </Box>
